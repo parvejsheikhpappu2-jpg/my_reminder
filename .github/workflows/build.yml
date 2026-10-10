@@ -1,0 +1,60 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Create Flutter project
+        run: flutter create --org com.example --project-name my_reminder app
+
+      - name: Add code and packages
+        run: |
+          cp main.dart app/lib/main.dart
+          cd app
+          flutter pub add android_alarm_manager_plus flutter_tts shared_preferences
+
+      - name: Patch AndroidManifest
+        run: |
+          cd app
+          python3 - <<'EOF'
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p).read()
+          perms = '''
+              <uses-permission android:name="android.permission.WAKE_LOCK"/>
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+              <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+              <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+          '''
+          comps = '''
+              <service android:name="dev.fluttercommunity.plus.androidalarmmanager.AlarmService"
+                  android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false"/>
+              <receiver android:name="dev.fluttercommunity.plus.androidalarmmanager.AlarmBroadcastReceiver"
+                  android:exported="false"/>
+              <receiver android:name="dev.fluttercommunity.plus.androidalarmmanager.RebootBroadcastReceiver"
+                  android:enabled="false" android:exported="true">
+                  <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/></intent-filter>
+              </receiver>
+          '''
+          s = s.replace('<application', perms + '<application', 1)
+          s = s.replace('</application>', comps + '</application>', 1)
+          open(p, 'w').write(s)
+          EOF
+
+      - name: Build APK
+        run: |
+          cd app
+          flutter build apk --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-apk
+          path: app/build/app/outputs/flutter-apk/app-release.apk
